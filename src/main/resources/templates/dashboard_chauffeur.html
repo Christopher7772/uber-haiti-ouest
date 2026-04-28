@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chauffeur | Uber Ouest</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/sockjs-client/1.5.1/sockjs.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/stomp.js/2.3.3/stomp.min.js"></script>
+
+    <style>
+        :root { --uber-black: #000000; }
+        body { background-color: #f3f3f3; font-family: 'Inter', sans-serif; }
+        .navbar-uber { background-color: var(--uber-black); color: white; }
+        .card-ride { border: none; border-radius: 12px; transition: 0.3s; margin-bottom: 15px; border-left: 5px solid var(--uber-black); }
+        #map-requests { height: 300px; border-radius: 15px; margin-bottom: 20px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+        .btn-accept { background-color: var(--uber-black); color: white; border-radius: 8px; font-weight: bold; }
+        .price-badge { background-color: #e6f2ed; color: #008a52; font-weight: bold; padding: 5px 12px; border-radius: 20px; }
+        /* Animation pour le point vert "En ligne" */
+        .online-dot { width: 10px; height: 10px; background-color: #28a745; border-radius: 50%; display: inline-block; animation: blink 1.5s infinite; }
+        @keyframes blink { 0% { opacity: 1; } 50% { opacity: 0.4; } 100% { opacity: 1; } }
+    </style>
+</head>
+<body>
+
+    <nav class="navbar navbar-uber px-4 py-3 shadow-sm">
+        <div class="container-fluid">
+            <span class="navbar-brand mb-0 h1 fw-bold"><i class="fas fa-car-side me-2"></i> UBER OUEST</span>
+            <div class="d-flex align-items-center">
+                <span id="chauffeurName" class="me-3 small fw-bold text-white"></span>
+                <button onclick="logout()" class="btn btn-sm btn-outline-light">Déconnexion</button>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container mt-4">
+        <div class="row">
+            <div class="col-lg-4">
+                <div class="bg-white p-4 rounded-4 shadow-sm mb-4">
+                    <h5 class="fw-bold mb-3">Statut Service</h5>
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <span><div class="online-dot"></div> <span class="small fw-bold text-success">DISPONIBLE</span></span>
+                        <div class="form-check form-switch"><input class="form-check-input" type="checkbox" checked disabled></div>
+                    </div>
+                    <hr>
+                    <p class="small text-muted mb-1">Gains cumulés (Aujourd'hui)</p>
+                    <h3 class="fw-bold" id="dailyEarnings">0.00 HTG</h3>
+                </div>
+            </div>
+
+            <div class="col-lg-8">
+                <div id="map-requests" class="shadow-sm border"></div>
+                <h4 class="fw-bold mb-4 text-dark">Demandes entrantes</h4>
+                <div id="availableRides" class="row">
+                    <div class="text-center p-5 bg-white rounded-4 shadow-sm">
+                        <div class="spinner-grow text-dark" role="status"></div>
+                        <p class="mt-3 text-muted fw-bold">Recherche de passagers...</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Initialisation de la carte Leaflet sur Port-au-Prince
+        var map = L.map('map-requests').setView([18.5392, -72.3350], 12);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+        var requestMarkers = L.layerGroup().addTo(map);
+
+        // Coordonnées des zones clés pour les marqueurs
+        const coords = {
+            "Pétion-Ville": [18.5122, -72.2853], "Delmas 33": [18.5445, -72.3021],
+            "Tabarre": [18.5755, -72.2641], "Carrefour": [18.5358, -72.3951],
+            "Aéroport": [18.5754, -72.2947], "Centre-ville": [18.5422, -72.3361]
+        };
+
+        // Sécurité : Vérification du token JWT
+        const token = localStorage.getItem('token');
+        if (!token) window.location.href = "/login";
+
+        // FONCTION MODIFIÉE : Récupère le profil et affiche "Bienvenue, Chauffeur [NOM]"
+        async function fetchProfile() {
+            try {
+                const response = await fetch('/api/users/profile', { 
+                    headers: { 'Authorization': `Bearer ${token}` } 
+                });
+                const user = await response.json();
+                
+                // Injection du texte formaté comme demandé
+                const nameDisplay = document.getElementById('chauffeurName');
+                nameDisplay.innerHTML = `Bienvenue, Chauffeur <span class="text-info">${user.username.toUpperCase()}</span>`;
+            } catch (e) { 
+                document.getElementById('chauffeurName').innerText = "Bienvenue, Chauffeur"; 
+            }
+        }
+
+        // Connexion aux Websockets pour recevoir les courses en temps réel
+        function connectWebsocket() {
+            const socket = new SockJS('/ws_uber');
+            const stompClient = Stomp.over(socket);
+            stompClient.connect({}, function (frame) {
+                stompClient.subscribe('/topic/available-rides', function (message) {
+                    const rides = JSON.parse(message.body);
+                    renderRides(rides);
+                    updateMapMarkers(rides);
+                });
+            });
+        }
+
+        // Récupération initiale des courses disponibles via l'API
+        async function fetchAvailableRides() {
+            try {
+                const response = await fetch('/api/rides/available', { 
+                    headers: { 'Authorization': `Bearer ${token}` } 
+                });
+                const rides = await response.json();
+                renderRides(rides);
+                updateMapMarkers(rides);
+            } catch (err) { console.error("Erreur de récupération des courses:", err); }
+        }
+
+        // Mise à jour des points bleus sur la carte pour chaque demande
+        function updateMapMarkers(rides) {
+            requestMarkers.clearLayers();
+            rides.forEach(ride => {
+                let pos = coords[ride.pickupLocation];
+                if(pos) L.circleMarker(pos, { color: 'blue', radius: 8 }).addTo(requestMarkers)
+                         .bindPopup(`Passager: ${ride.passengerName}`);
+            });
+        }
+
+        // Génération HTML des cartes de courses
+        function renderRides(rides) {
+            const container = document.getElementById('availableRides');
+            if (!rides || rides.length === 0) {
+                container.innerHTML = `<div class="col-12 text-center p-5 bg-white rounded-4 shadow-sm"><p class="text-muted fw-bold">Aucune course pour le moment.</p></div>`;
+                return;
+            }
+            container.innerHTML = rides.map(ride => `
+                <div class="col-12 mb-3">
+                    <div class="card card-ride p-4 shadow-sm bg-white">
+                        <div class="d-flex justify-content-between">
+                            <div>
+                                <span class="badge bg-dark mb-2">#ID-${ride.id}</span>
+                                <p class="small mb-2">PASSAGER: <strong>${ride.passengerName}</strong></p>
+                                <p class="small mb-1"><i class="fas fa-map-pin text-primary me-2"></i>${ride.pickupLocation}</p>
+                                <p class="small"><i class="fas fa-flag-checkered text-danger me-2"></i>${ride.destination}</p>
+                            </div>
+                            <div class="text-end"><span class="price-badge">${ride.fare} HTG</span></div>
+                        </div>
+                        <button onclick="acceptRide(${ride.id})" class="btn btn-accept w-100 py-2 mt-3">ACCEPTER LA COURSE</button>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        // Action d'acceptation d'une course
+        async function acceptRide(rideId) {
+            try {
+                const response = await fetch(`/api/rides/${rideId}/accept`, {
+                    method: 'POST',
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                if (response.ok) { 
+                    window.location.href = "/ride_active?id=" + rideId; 
+                } else { 
+                    alert("Désolé, cette course a déjà été prise."); 
+                    fetchAvailableRides(); 
+                }
+            } catch (err) { alert("Erreur de connexion au serveur."); }
+        }
+
+        // Au chargement de la page
+        document.addEventListener('DOMContentLoaded', () => { 
+            fetchProfile(); 
+            fetchAvailableRides(); 
+            connectWebsocket(); 
+        });
+
+        // Déconnexion
+        function logout() { 
+            localStorage.removeItem('token'); 
+            window.location.href = "/login"; 
+        }
+    </script>
+</body>
+</html>

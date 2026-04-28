@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <title>Dashboard | Uber Ouest</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/sockjs-client/1.5.1/sockjs.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/stomp.js/2.3.3/stomp.min.js"></script>
+
+    <style>
+        #map { height: 400px; border-radius: 15px; width: 100%; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+        .table-card { border-radius: 15px; border: none; }
+        .btn-moncash { background-color: #8C1D2F; color: white; font-weight: bold; border: none; }
+        .btn-moncash:hover { background-color: #631421; color: white; }
+        .badge-paid { background-color: #28a745; color: white; }
+        .badge-unpaid { background-color: #ffc107; color: black; }
+    </style>
+</head>
+<body class="bg-light">
+
+    <nav class="navbar navbar-dark bg-black mb-4 shadow-sm">
+        <div class="container">
+            <a class="navbar-brand fw-bold" href="#"><i class="fas fa-car-side me-2"></i>Uber Ouest</a>
+            <div class="d-flex">
+                <span id="userGreeting" class="text-white me-3 align-self-center d-none d-md-block"></span>
+                <button class="btn btn-outline-light btn-sm" onclick="logout()">Déconnexion</button>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container">
+        <div class="row">
+            <div class="col-md-5">
+                <div class="card shadow-sm p-4 border-0 mb-4">
+                    <h4 class="mb-4 fw-bold">Où allez-vous ?</h4>
+                    <form id="rideForm">
+                        <div class="mb-3">
+                            <label class="form-label small fw-bold text-secondary">DÉPART</label>
+                            <select id="pickup" class="form-select" onchange="updateMapMarkers()">
+                                <option value="Pétion-Ville">Pétion-Ville (Place Boyer)</option>
+                                <option value="Delmas 33">Delmas 33</option>
+                                <option value="Tabarre">Tabarre (Ambassade)</option>
+                                <option value="Carrefour">Carrefour (Diquini)</option>
+                            </select>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label small fw-bold text-secondary">DESTINATION</label>
+                            <select id="destination" class="form-select" onchange="updateMapMarkers()">
+                                <option value="Aéroport">Aéroport Toussaint Louverture</option>
+                                <option value="Pétion-Ville">Pétion-Ville</option>
+                                <option value="Centre-ville">Port-au-Prince (Centre)</option>
+                                <option value="Delmas 75">Delmas 75</option>
+                            </select>
+                        </div>
+                        <button type="submit" class="btn btn-dark w-100 p-2 fw-bold shadow">COMMANDER MAINTENANT</button>
+                    </form>
+                </div>
+            </div>
+
+            <div class="col-md-7">
+                <div id="map" class="shadow-sm border"></div>
+            </div>
+        </div>
+
+        <div class="row mt-4">
+            <div class="col-12">
+                <div class="card shadow-sm table-card p-4">
+                    <h5 class="fw-bold mb-4"><i class="fas fa-history me-2 text-primary"></i>Mes trajets & Paiements</h5>
+                    <div class="table-responsive">
+                        <table class="table table-hover align-middle">
+                            <thead class="table-light">
+                                <tr>
+                                    <th>Départ</th>
+                                    <th>Destination</th>
+                                    <th>Prix Estimé</th>
+                                    <th>Statut Course</th>
+                                    <th>Paiement</th>
+                                    <th>Action</th>
+                                </tr>
+                            </thead>
+                            <tbody id="historyTableBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+    var map = L.map('map').setView([18.5392, -72.3350], 13);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+
+    var pickupMarker, destMarker;
+    const coords = {
+        "Pétion-Ville": [18.5122, -72.2853], "Delmas 33": [18.5445, -72.3021],
+        "Tabarre": [18.5755, -72.2641], "Carrefour": [18.5358, -72.3951],
+        "Aéroport": [18.5754, -72.2947], "Centre-ville": [18.5422, -72.3361],
+        "Delmas 75": [18.5255, -72.2885]
+    };
+
+    function updateMapMarkers() {
+        let pVal = document.getElementById('pickup').value;
+        let dVal = document.getElementById('destination').value;
+        if(pickupMarker) map.removeLayer(pickupMarker);
+        if(destMarker) map.removeLayer(destMarker);
+        if(coords[pVal]) pickupMarker = L.marker(coords[pVal]).addTo(map).bindPopup("Départ");
+        if(coords[dVal]) destMarker = L.marker(coords[dVal]).addTo(map).bindPopup("Arrivée");
+        if(pickupMarker && destMarker) {
+            var group = new L.featureGroup([pickupMarker, destMarker]);
+            map.fitBounds(group.getBounds().pad(0.5));
+        }
+    }
+
+    const token = localStorage.getItem('token');
+    if (!token) window.location.href = "/login";
+
+    async function payWithMonCash(rideId) {
+        try {
+            const response = await fetch(`/api/payment/initiate/${rideId}`, {
+                method: 'POST',
+                headers: { 'Authorization': 'Bearer ' + token }
+            });
+            const data = await response.json();
+            if (data.paymentUrl) { window.location.href = data.paymentUrl; } 
+            else { alert("Erreur MonCash: " + (data.message || "Vérifiez votre serveur")); }
+        } catch (error) { alert("Impossible de joindre le serveur de paiement."); }
+    }
+
+    let stompClient = null;
+    function connectWebsocket(username) {
+        if (stompClient) return;
+        const socket = new SockJS('/ws_uber');
+        stompClient = Stomp.over(socket);
+        stompClient.connect({}, function (frame) {
+            stompClient.subscribe('/topic/passenger/' + username, function (notification) {
+                const data = JSON.parse(notification.body);
+                if (data.type === 'RIDE_ACCEPTED') {
+                    alert("Chauffeur trouvé !");
+                    loadHistory();
+                }
+            });
+        });
+    }
+
+    async function loadHistory() {
+        try {
+            const response = await fetch('/api/rides/my-history', {
+                headers: { 'Authorization': 'Bearer ' + token }
+            });
+            if (!response.ok) return;
+            const rides = await response.json();
+            
+            if(rides.length > 0) {
+                const username = rides[0].passengerName;
+                document.getElementById('userGreeting').innerText = "Bienvenue, " + username;
+                document.getElementById('userGreeting').classList.remove('d-none');
+                connectWebsocket(username);
+            }
+
+            const tableBody = document.getElementById('historyTableBody');
+            tableBody.innerHTML = rides.slice().reverse().map(ride => { 
+                const payBadge = ride.paymentStatus === 'PAYÉ' 
+                    ? `<span class="badge badge-paid"><i class="fas fa-check me-1"></i>Réglé</span>`
+                    : `<span class="badge badge-unpaid"><i class="fas fa-clock me-1"></i>En attente</span>`;
+
+                const actionButton = (ride.paymentStatus !== 'PAYÉ' && ride.status !== 'CANCELLED')
+                    ? `<button class="btn btn-sm btn-moncash shadow-sm" onclick="payWithMonCash(${ride.id})">
+                         <i class="fas fa-wallet me-1"></i>Payer MonCash
+                       </button>`
+                    : `<span class="text-muted small">Terminé</span>`;
+
+                return `<tr>
+                    <td>${ride.pickupLocation}</td>
+                    <td>${ride.destination}</td>
+                    <td><strong>${ride.fare} HTG</strong></td>
+                    <td><span class="badge bg-dark">${ride.status}</span></td>
+                    <td>${payBadge}</td>
+                    <td>${actionButton}</td>
+                </tr>`;
+            }).join('');
+        } catch (error) { console.error("Erreur historique:", error); }
+    }
+
+    document.getElementById('rideForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const btn = e.target.querySelector('button');
+        btn.disabled = true;
+        btn.innerText = "CHARGEMENT...";
+
+        const payload = {
+            pickupLocation: document.getElementById('pickup').value,
+            destination: document.getElementById('destination').value
+        };
+
+        try {
+            const response = await fetch('/api/rides/request', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+                body: JSON.stringify(payload)
+            });
+            if(response.ok) { alert("Course demandée !"); loadHistory(); } 
+            else { alert("Erreur lors de la commande."); }
+        } catch (err) { alert("Erreur réseau."); } 
+        finally { btn.disabled = false; btn.innerText = "COMMANDER MAINTENANT"; }
+    });
+
+    document.addEventListener('DOMContentLoaded', () => { loadHistory(); updateMapMarkers(); });
+    function logout() { localStorage.removeItem('token'); window.location.href = "/login"; }
+</script>
+</body>
+</html>

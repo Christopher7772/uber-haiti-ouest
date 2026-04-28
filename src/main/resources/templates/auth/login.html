@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Connexion | Uber Ouest Haïti</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+</head>
+<body class="bg-gray-50 flex items-center justify-center min-h-screen">
+
+    <div class="max-w-md w-full bg-white p-8 rounded-xl shadow-lg">
+        <div class="text-center mb-10">
+            <h1 class="text-3xl font-bold text-gray-900">Uber <span class="text-blue-600">Ouest</span></h1>
+            <p class="text-gray-500 mt-2">Bienvenue en Haïti. Connectez-vous pour continuer.</p>
+        </div>
+
+        <form id="loginForm" class="space-y-6">
+            <div>
+                <label class="block text-sm font-medium text-gray-700">Nom d'utilisateur</label>
+                <div class="mt-1 relative">
+                    <span class="absolute inset-y-0 left-0 pl-3 flex items-center text-gray-400">
+                        <i class="fas fa-user"></i>
+                    </span>
+                    <input type="text" id="username" name="username" required 
+                           class="pl-10 block w-full border-gray-300 rounded-md border p-2.5 focus:ring-blue-500 focus:border-blue-500" 
+                           placeholder="Ex: janvier77">
+                </div>
+            </div>
+
+            <div>
+                <label class="block text-sm font-medium text-gray-700">Mot de passe</label>
+                <div class="mt-1 relative">
+                    <span class="absolute inset-y-0 left-0 pl-3 flex items-center text-gray-400">
+                        <i class="fas fa-lock"></i>
+                    </span>
+                    <input type="password" id="password" name="password" required 
+                           class="pl-10 block w-full border-gray-300 rounded-md border p-2.5 focus:ring-blue-500 focus:border-blue-500" 
+                           placeholder="••••••••">
+                </div>
+            </div>
+
+            <button type="submit" 
+                    class="w-full bg-black text-white p-3 rounded-md font-semibold hover:bg-gray-800 transition duration-300">
+                Se connecter
+            </button>
+        </form>
+
+        <div class="mt-6 text-center text-sm">
+            <span class="text-gray-600">Pas encore de compte ?</span>
+            <a th:href="@{/register}" class="text-blue-600 font-semibold hover:underline">S'inscrire ici</a>
+        </div>
+    </div>
+
+    <script>
+    document.getElementById('loginForm').addEventListener('submit', async (e) => {
+        e.preventDefault(); 
+
+        const loginData = {
+            username: document.getElementById('username').value,
+            password: document.getElementById('password').value
+        };
+
+        try {
+            const response = await fetch('/api/auth/login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(loginData)
+            });
+
+            // CORRECTION PRO : On vérifie si la réponse est bien du JSON avant de la parser
+            const contentType = response.headers.get("content-type");
+            let result;
+            if (contentType && contentType.indexOf("application/json") !== -1) {
+                result = await response.json();
+            }
+
+            if (response.ok && result) {
+                // --- AMÉLIORATION SÉCURITÉ : Vérification des clés ---
+                // Si ton backend renvoie 'accessToken' au lieu de 'token', on s'adapte
+                const token = result.token || result.accessToken;
+                const role = result.role || (result.roles ? result.roles[0] : null);
+
+                if (!token) {
+                    console.error("Erreur : Le serveur n'a pas renvoyé de Token ! Vérifie ton AuthController.");
+                    alert("Erreur de session. Contactez l'administrateur.");
+                    return;
+                }
+
+                // IMPORTANT : On enregistre le Token et le Rôle pour la session
+                localStorage.setItem('token', token);
+                localStorage.setItem('role', role);
+
+                console.log("Login réussi ! Token enregistré pour :", role);
+
+                // --- LOGIQUE DE REDIRECTION PAR RÔLE (PRO) ---
+                if (role === 'CHAUFFEUR') {
+                    window.location.href = "/dashboard_chauffeur";
+                } else if (role === 'PASSAGER') {
+                    window.location.href = "/dashboard";
+                } else if (role === 'ADMIN') {
+                    window.location.href = "/admin-dashboard";
+                } else {
+                    window.location.href = "/dashboard";
+                }
+
+            } else {
+                alert("Identifiants incorrects ou serveur indisponible.");
+            }
+        } catch (error) {
+            console.error("Erreur login:", error);
+            alert("Erreur de connexion au serveur.");
+        }
+    });
+    </script>
+</body>
+</html>

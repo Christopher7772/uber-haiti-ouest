@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <title>Trajet en cours | Uber Ouest</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/sockjs-client/1.5.1/sockjs.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/stomp.js/2.3.3/stomp.min.js"></script>
+
+    <style>
+        #map { height: 350px; border-radius: 15px; margin: 15px; box-shadow: inset 0 0 10px rgba(0,0,0,0.1); }
+        .status-pulse { width: 12px; height: 12px; background: #28a745; border-radius: 50%; display: inline-block; animation: pulse 2s infinite; }
+        @keyframes pulse { 0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(40, 167, 69, 0.7); } 70% { transform: scale(1); box-shadow: 0 0 0 10px rgba(40, 167, 69, 0); } 100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(40, 167, 69, 0); } }
+        .btn-moncash { background-color: #8C1D2F; color: white; font-weight: bold; }
+        .btn-moncash:hover { background-color: #631421; color: white; }
+    </style>
+</head>
+<body class="bg-light">
+
+<div class="container py-4">
+    <div class="card shadow-lg border-0 rounded-4 overflow-hidden">
+        <div class="bg-dark text-white p-3 d-flex justify-content-between align-items-center">
+            <span><div class="status-pulse me-2"></div> <strong id="statusLabel">COURSE EN COURS</strong></span>
+            <span id="rideIdDisplay" class="small text-secondary">#ID-000</span>
+        </div>
+
+        <div id="map"></div>
+
+        <div class="p-4">
+            <div class="row align-items-center">
+                <div class="col-6">
+                    <p class="text-muted mb-1 small">VOTRE CHAUFFEUR</p>
+                    <h5 id="driverName" class="fw-bold text-uppercase">--</h5>
+                </div>
+                <div class="col-6 text-end">
+                    <p class="text-muted mb-1 small">MONTANT À PAYER</p>
+                    <h5 id="rideFare" class="fw-bold text-success">-- HTG</h5>
+                </div>
+            </div>
+            
+            <hr class="my-4">
+            
+            <div class="mb-3 d-flex align-items-center">
+                <i class="fas fa-map-marker-alt text-primary me-3"></i>
+                <div>
+                    <p class="text-muted mb-0 small">Point de départ</p>
+                    <span id="pickup" class="fw-bold">Chargement...</span>
+                </div>
+            </div>
+            <div class="mb-4 d-flex align-items-center">
+                <i class="fas fa-flag-checkered text-danger me-3"></i>
+                <div>
+                    <p class="text-muted mb-0 small">Destination finale</p>
+                    <span id="destination" class="fw-bold">Chargement...</span>
+                </div>
+            </div>
+
+            <div id="actionArea">
+                <button id="completeBtn" onclick="finishRide()" class="btn btn-dark w-100 py-3 fw-bold d-none shadow">
+                    MARQUER COMME TERMINÉE (DÉPÔT EFFECTUÉ)
+                </button>
+
+                <button id="payMonCashBtn" onclick="payWithMonCash()" class="btn btn-moncash w-100 py-3 fw-bold d-none shadow">
+                    <i class="fas fa-wallet me-2"></i> PAYER MAINTENANT AVEC MONCASH
+                </button>
+                
+                <div id="paymentSuccessMsg" class="alert alert-success d-none text-center fw-bold">
+                    <i class="fas fa-check-circle me-2"></i> PAIEMENT CONFIRMÉ
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    const urlParams = new URLSearchParams(window.location.search);
+    const rideId = urlParams.get('id');
+    const token = localStorage.getItem('token');
+    const userRole = localStorage.getItem('role'); // Assure-toi que cette info est stockée au login
+
+    // Initialisation Map Leaflet
+    var map = L.map('map').setView([18.5392, -72.3350], 13);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '© OpenStreetMap contributors'
+    }).addTo(map);
+
+    const coords = {
+        "Pétion-Ville": [18.5122, -72.2853], "Delmas 33": [18.5445, -72.3021],
+        "Tabarre": [18.5755, -72.2641], "Carrefour": [18.5358, -72.3951],
+        "Aéroport": [18.5754, -72.2947], "Centre-ville": [18.5422, -72.3361],
+        "Delmas 75": [18.5255, -72.2885]
+    };
+
+    /**
+     * --- MISE À JOUR DE L'INTERFACE ---
+     */
+    async function updateRideUI() {
+        try {
+            const response = await fetch(`/api/rides/${rideId}`, {
+                headers: { 'Authorization': 'Bearer ' + token }
+            });
+            const ride = await response.json();
+
+            // Remplissage des données
+            document.getElementById('rideIdDisplay').innerText = "#ID-" + ride.id;
+            document.getElementById('driverName').innerText = ride.driverName || "En recherche...";
+            document.getElementById('rideFare').innerText = ride.fare + " HTG";
+            document.getElementById('pickup').innerText = ride.pickupLocation;
+            document.getElementById('destination').innerText = ride.destination;
+
+            // Gestion de l'affichage des boutons selon le rôle
+            if (userRole === 'CHAUFFEUR') {
+                document.getElementById('completeBtn').classList.remove('d-none');
+            } else if (userRole === 'PASSAGER') {
+                // Si le passager n'a pas encore payé, on montre le bouton MonCash
+                if (ride.paymentStatus !== 'PAYÉ') {
+                    document.getElementById('payMonCashBtn').classList.remove('d-none');
+                } else {
+                    document.getElementById('paymentSuccessMsg').classList.remove('d-none');
+                }
+                connectStatusWatcher(ride.passengerName);
+            }
+
+            // --- TRACÉ SUR LA CARTE ---
+            let start = coords[ride.pickupLocation] || [18.5392, -72.3350];
+            let end = coords[ride.destination] || [18.5422, -72.3361];
+
+            L.marker(start, {icon: L.divIcon({className: 'fas fa-circle text-primary', iconSize: [12, 12]})}).addTo(map);
+            L.marker(end, {icon: L.divIcon({className: 'fas fa-map-pin text-danger', iconSize: [15, 15]})}).addTo(map);
+            
+            var polyline = L.polyline([start, end], {color: 'black', weight: 4, opacity: 0.6, dashArray: '10, 10'}).addTo(map);
+            map.fitBounds(polyline.getBounds(), {padding: [40, 40]});
+
+        } catch (err) {
+            console.error("Erreur chargement course:", err);
+        }
+    }
+
+    /**
+     * --- PAIEMENT MONCASH (PASSAGER) ---
+     */
+    async function payWithMonCash() {
+        try {
+            const response = await fetch(`/api/payment/initiate/${rideId}`, {
+                method: 'POST',
+                headers: { 'Authorization': 'Bearer ' + token }
+            });
+            const data = await response.json();
+            if (data.paymentUrl) {
+                window.location.href = data.paymentUrl;
+            }
+        } catch (e) { alert("Erreur MonCash. Réessayez."); }
+    }
+
+    /**
+     * --- WATCHER TEMPS RÉEL (WEBHOOKS / WEBSOCKETS) ---
+     */
+    function connectStatusWatcher(username) {
+        const socket = new SockJS('/ws_uber');
+        const stompClient = Stomp.over(socket);
+        stompClient.connect({}, function () {
+            stompClient.subscribe('/topic/passenger/' + username, function (notif) {
+                const data = JSON.parse(notif.body);
+                
+                // Si le chauffeur termine la course
+                if (data.type === 'RIDE_COMPLETED') {
+                    alert("Course terminée avec succès !");
+                    window.location.href = "/dashboard"; 
+                }
+                
+                // Si le paiement est confirmé pendant le trajet
+                if (data.type === 'PAYMENT_CONFIRMED') {
+                    document.getElementById('payMonCashBtn').classList.add('d-none');
+                    document.getElementById('paymentSuccessMsg').classList.remove('d-none');
+                }
+            });
+        });
+    }
+
+    /**
+     * --- FINALISER LA COURSE (CHAUFFEUR) ---
+     */
+    async function finishRide() {
+        if (!confirm("Confirmez-vous la fin de la course ?")) return;
+
+        const response = await fetch(`/api/rides/${rideId}/complete`, {
+            method: 'POST',
+            headers: { 'Authorization': 'Bearer ' + token }
+        });
+
+        if (response.ok) {
+            alert("Course clôturée. Merci Chauffeur !");
+            window.location.href = "/dashboard_chauffeur";
+        }
+    }
+
+    // Lancement
+    document.addEventListener('DOMContentLoaded', updateRideUI);
+</script>
+</body>
+</html>
