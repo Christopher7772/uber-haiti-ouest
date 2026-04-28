@@ -91,12 +91,21 @@
 			<scope>test</scope>
 		</dependency>
                 
+<<<<<<< HEAD
        
                 <dependency>
     <groupId>org.postgresql</groupId>
     <artifactId>postgresql</artifactId>
     <scope>runtime</scope>
 </dependency>         
+=======
+
+		<dependency>
+    <groupId>org.postgresql</groupId>
+    <artifactId>postgresql</artifactId>
+    <scope>runtime</scope>
+</dependency>
+>>>>>>> 6bdc2ebde17a467f78c1649e1c2888e079a0a814
   
   
   <dependency>
