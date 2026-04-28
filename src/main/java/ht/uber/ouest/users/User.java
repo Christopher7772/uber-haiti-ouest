@@ -30,15 +30,11 @@ public class User implements UserDetails {
 
     // --- NOUVEAUX CHAMPS POUR L'ADMINISTRATION ---
     
-@Column(name = "is_active", columnDefinition = "boolean default true") 
+    @Column(name = "is_active", columnDefinition = "boolean default true") 
+    private boolean isActive = true; // Pour suspendre/activer un compte
 
-private boolean isActive = true; // Pour suspendre/activer un compte
-
-
-
-@Column(name = "is_driver_validated", columnDefinition = "boolean default true")
-
-private boolean isDriverValidated = true; // Pour valider les documents des chauffeurs
+    @Column(name = "is_driver_validated", columnDefinition = "boolean default true")
+    private boolean isDriverValidated = true; // Pour valider les documents des chauffeurs
 
     // Constructeur vide (Obligatoire pour JPA)
     public User() {
