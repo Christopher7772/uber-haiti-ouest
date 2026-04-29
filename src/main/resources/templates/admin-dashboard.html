@@ -114,10 +114,13 @@
             </div>
         </div>
     </main>
+<script>
+        // --- CONFIGURATION DYNAMIQUE ---
+        // On détecte si on est en local ou sur Render
+        const API_URL = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+            ? 'http://localhost:10000/api/admin' // Port 10000 souvent utilisé pour ton backend local
+            : 'https://uber-haiti-ouest.onrender.com/api/admin'; // Ton URL de production
 
-    <script>
-        // --- CONFIGURATION ---
-        const API_URL = 'http://localhost:8091/api/admin';
         // Utilisation de la clé 'token' pour la cohérence avec le dashboard passager
         const token = localStorage.getItem('token'); 
         
@@ -135,7 +138,9 @@
             document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
             document.querySelectorAll('.nav-links li').forEach(l => l.classList.remove('active'));
             document.getElementById(id).classList.add('active');
-            event.currentTarget.classList.add('active');
+            // Correction ici : l'événement est passé pour changer la classe active sur le menu
+            if(event) event.currentTarget.classList.add('active'); 
+            
             if(id === 'dashboard-section') { loadDashboardData(); }
             if(id === 'users-section') { loadUsers(); }
         }
@@ -143,7 +148,7 @@
         // --- GESTION DES ERREURS API (401/403) ---
         function handleApiError(response) {
             if (response.status === 401 || response.status === 403) {
-                alert("Session expirée ou accès non autorisé.");
+                alert("Session expirée ou accès non autorisé. Vérifiez que John est bien ADMIN en base.");
                 logout();
             }
             return response;
@@ -152,12 +157,14 @@
         // --- CHARGEMENT DATA DASHBOARD ---
         async function loadDashboardData() {
             try {
+                // Chargement des statistiques globales
                 const resStats = await fetch(`${API_URL}/stats`, { headers }).then(handleApiError);
                 const stats = await resStats.json();
-                document.getElementById('stat-users').innerText = stats.totalUsers;
-                document.getElementById('stat-rides').innerText = stats.totalRides;
+                document.getElementById('stat-users').innerText = stats.totalUsers || 0;
+                document.getElementById('stat-rides').innerText = stats.totalRides || 0;
                 document.getElementById('stat-revenue').innerText = (stats.totalRevenueHTG || 0).toLocaleString();
 
+                // Chargement des dernières courses
                 const resRides = await fetch(`${API_URL}/rides`, { headers }).then(handleApiError);
                 const rides = await resRides.json();
                 const tbody = document.querySelector('#rides-table tbody');
@@ -179,6 +186,12 @@
                 const res = await fetch(`${API_URL}/users`, { headers }).then(handleApiError);
                 const users = await res.json();
                 const tbody = document.querySelector('#users-table tbody');
+                
+                if (users.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="6" class="text-center">Aucun utilisateur trouvé sur Aiven.</td></tr>';
+                    return;
+                }
+
                 tbody.innerHTML = users.map(u => {
                     const statusText = u.active ? 'Actif' : 'Suspendu';
                     const statusClass = u.active ? 'bg-success' : 'bg-danger';
@@ -211,7 +224,7 @@
             if(!confirm("Changer le statut de cet utilisateur ?")) return;
             const res = await fetch(`${API_URL}/users/${id}/toggle-status`, { method: 'PUT', headers }).then(handleApiError);
             const data = await res.json();
-            alert(data.message || data.error);
+            alert(data.message || "Statut mis à jour");
             loadUsers();
         }
 
@@ -219,7 +232,7 @@
             if(!confirm("Valider officiellement ce chauffeur ?")) return;
             const res = await fetch(`${API_URL}/users/${id}/validate`, { method: 'PUT', headers }).then(handleApiError);
             const data = await res.json();
-            alert(data.message || data.error);
+            alert(data.message || "Chauffeur validé");
             loadUsers();
         }
 
