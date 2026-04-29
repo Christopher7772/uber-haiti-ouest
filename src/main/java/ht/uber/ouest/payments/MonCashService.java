@@ -31,8 +31,8 @@ public class MonCashService {
     // ⚠️ AJOUT : URL de retour (celle que MonCash appellera après paiement)
     // Pour les tests locaux, vous devez exposer votre serveur publiquement (ngrok).
     // Si vous utilisez localhost, MonCash ne pourra pas joindre votre serveur.
-    @Value("${moncash.return.url:https://uber-haiti-ouest.com/api/payment/success}")
-    private String returnUrl;
+    @Value("${moncash.return.url}")
+private String returnUrl;
 
     private final RestTemplate restTemplate = new RestTemplate();
 
