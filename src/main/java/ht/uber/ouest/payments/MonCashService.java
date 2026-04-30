@@ -32,7 +32,7 @@ public class MonCashService {
     // Pour les tests locaux, vous devez exposer votre serveur publiquement (ngrok).
     // Si vous utilisez localhost, MonCash ne pourra pas joindre votre serveur.
     @Value("${moncash.return.url}")
-private String returnUrl;
+    private String returnUrl;
 
     private final RestTemplate restTemplate = new RestTemplate();
 
@@ -129,27 +129,10 @@ private String returnUrl;
                 }
                 
                 if (transactionToken != null && !transactionToken.isEmpty()) {
-                    // ===== CORRECTION : CONSTRUCTION ROBUSTE DE L'URL FINALE =====
-                    // Nettoyer la base de redirection
-                    String base = redirectUrlBase.trim();
-                    
-                    // Si la base ne contient pas "?token=", l'ajouter proprement
-                    if (!base.contains("?token=")) {
-                        // Supprimer un éventuel slash final ou un point d'interrogation existant
-                        base = base.replaceAll("/$", "");
-                        base = base.replaceAll("\\?$", "");
-                        base += "?token=";
-                    } else {
-                        // Si elle contient déjà "?token=", s'assurer qu'il n'y a pas de double slash avant le token
-                        base = base.replaceAll("(?<=token=)/+", "");
-                    }
-                    
-                    // Concaténer le token
-                    String finalUrl = base + transactionToken.trim();
-                    
-                    // Éviter les doubles slashes dans l'URL (sauf après le protocole https://)
-                    finalUrl = finalUrl.replaceFirst("(?<=https?:)/{2,}", "/");
-                    
+                    // ===== CONSTRUCTION SIMPLIFIÉE DE L'URL FINALE =====
+                    // On construit simplement la base + "?token=" + le token
+                    // (la base ne doit pas déjà contenir "?token=")
+                    String finalUrl = redirectUrlBase.trim() + "?token=" + transactionToken.trim();
                     System.out.println("✅ URL GÉNÉRÉE : " + finalUrl);
                     return finalUrl;
                 } else {
