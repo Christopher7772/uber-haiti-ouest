@@ -88,4 +88,20 @@ public class PaymentController {
                       "</body></html>";
         return ResponseEntity.ok(html);
     }
+
+    /**
+     * 4. REDIRECTION APRÈS PAIEMENT (GET) : Appelée par MonCash pour ramener l'utilisateur.
+     *    Le paramètre transactionId est ajouté automatiquement par MonCash.
+     */
+    @GetMapping("/return")
+    public ResponseEntity<String> handleReturnRedirect(@RequestParam(required = false) String transactionId) {
+        System.out.println("🔁 Redirection utilisateur après paiement, transactionId=" + transactionId);
+        // Affiche une page de confirmation (peut aussi rediriger vers /success)
+        String html = "<html><body style='font-family:sans-serif; text-align:center; padding-top:50px;'>" +
+                      "<h1 style='color:green;'>Paiement effectué avec succès ✅</h1>" +
+                      "<p>Votre transaction (" + transactionId + ") a été enregistrée.</p>" +
+                      "<a href='/dashboard'>Retour au tableau de bord</a>" +
+                      "</body></html>";
+        return ResponseEntity.ok(html);
+    }
 }
