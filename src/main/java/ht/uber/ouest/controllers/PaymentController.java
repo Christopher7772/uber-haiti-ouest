@@ -9,6 +9,7 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Optional;
 
 /**
  * Contrôleur de paiement optimisé pour Uber Ouest.
@@ -115,11 +116,48 @@ public class PaymentController {
     /**
      * 4. REDIRECTION APRÈS PAIEMENT (GET) : Appelée par MonCash pour ramener l'utilisateur.
      *    Le paramètre transactionId est ajouté automatiquement par MonCash.
+     *    🔧 CONTOURNEMENT : Met à jour le statut de la course dans la base de données
+     *    en utilisant l'ID extrait du transactionId. Ceci compense le manque de webhook
+     *    dans l'environnement Sandbox.
      */
     @GetMapping("/return")
     public ResponseEntity<String> handleReturnRedirect(@RequestParam(required = false) String transactionId) {
         System.out.println("🔁 Redirection utilisateur après paiement, transactionId=" + transactionId);
-        // Affiche une page de confirmation (peut aussi rediriger vers /success)
+        
+        // ========== DÉBUT DE LA SOLUTION DE CONTOURNEMENT ==========
+        // En l'absence de webhook POST fonctionnel (problème connu en Sandbox),
+        // on met à jour le statut du paiement directement ici.
+        if (transactionId != null && transactionId.contains("R") && transactionId.contains("T")) {
+            try {
+                // Extraire l'ID de la course depuis le transactionId (format R<id>...)
+                String rideIdStr = transactionId.substring(transactionId.indexOf("R") + 1, transactionId.indexOf("T"));
+                Long rideId = Long.parseLong(rideIdStr);
+                System.out.println("🛠️ CONTOURNEMENT : tentative mise à jour course " + rideId);
+                
+                Optional<Ride> optionalRide = rideRepository.findById(rideId);
+                if (optionalRide.isPresent()) {
+                    Ride ride = optionalRide.get();
+                    // Vérifier si le statut n'est pas déjà "PAYÉ"
+                    if (!"PAYÉ".equals(ride.getPaymentStatus())) {
+                        ride.setPaymentStatus("PAYÉ");
+                        rideRepository.save(ride);
+                        System.out.println("✅ CONTOURNEMENT : Course " + rideId + " marquée PAYÉE (transactionId=" + transactionId + ")");
+                    } else {
+                        System.out.println("ℹ️ CONTOURNEMENT : Course " + rideId + " déjà PAYÉE");
+                    }
+                } else {
+                    System.err.println("⚠️ CONTOURNEMENT : Course " + rideId + " non trouvée");
+                }
+            } catch (Exception e) {
+                System.err.println("❌ Erreur dans le contournement : " + e.getMessage());
+                e.printStackTrace();
+            }
+        } else {
+            System.out.println("ℹ️ Aucun transactionId valide (format R...T) reçu pour mise à jour");
+        }
+        // ========== FIN DE LA SOLUTION DE CONTOURNEMENT ==========
+        
+        // Affiche une page de confirmation pour l'utilisateur
         String html = "<html><body style='font-family:sans-serif; text-align:center; padding-top:50px;'>" +
                       "<h1 style='color:green;'>Paiement effectué avec succès ✅</h1>" +
                       "<p>Votre transaction (" + transactionId + ") a été enregistrée.</p>" +
