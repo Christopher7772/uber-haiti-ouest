@@ -50,27 +50,50 @@ public class PaymentController {
     @PostMapping("/return")
     public ResponseEntity<?> processMonCashAlert(@RequestBody Map<String, Object> payload) {
         try {
-            // Extraction de l'orderId (ex: R7T177733166)
-            String orderIdStr = (String) payload.get("orderId");
+            // 🔍 LOG DU PAYLOAD COMPLET (indispensable pour voir ce que MonCash envoie)
+            System.out.println("📥 WEBHOOK RECU - Payload complet : " + payload);
+            
+            // Extraction de l'identifiant (orderId) depuis différentes clés possibles
+            String orderIdStr = null;
+            if (payload.containsKey("orderId")) {
+                orderIdStr = (String) payload.get("orderId");
+            } else if (payload.containsKey("order_id")) {
+                orderIdStr = (String) payload.get("order_id");
+            } else if (payload.containsKey("reference")) {
+                orderIdStr = (String) payload.get("reference");
+            } else if (payload.containsKey("transactionId")) {
+                orderIdStr = (String) payload.get("transactionId");
+            } else if (payload.containsKey("id")) {
+                orderIdStr = (String) payload.get("id");
+            }
+            
+            System.out.println("🔑 Identifiant extrait : " + orderIdStr);
             
             if (orderIdStr != null && orderIdStr.contains("R") && orderIdStr.contains("T")) {
                 // Découpage : on prend ce qui est APRES 'R' et AVANT 'T'
                 String rideIdStr = orderIdStr.substring(orderIdStr.indexOf("R") + 1, orderIdStr.indexOf("T"));
                 Long rideId = Long.parseLong(rideIdStr);
+                System.out.println("🚗 ID course extrait : " + rideId);
 
                 // Mise à jour du statut en base de données
-                Ride ride = rideRepository.findById(rideId).orElseThrow();
-                ride.setPaymentStatus("PAYÉ");
-                rideRepository.save(ride);
-
-                System.out.println("✅ Notification MonCash traitée : Course " + rideId + " est PAYÉE.");
-                return ResponseEntity.ok("Notification reçue");
+                Ride ride = rideRepository.findById(rideId).orElse(null);
+                if (ride != null) {
+                    ride.setPaymentStatus("PAYÉ");
+                    rideRepository.save(ride);
+                    System.out.println("✅ Notification MonCash traitée : Course " + rideId + " est PAYÉE.");
+                    return ResponseEntity.ok("Notification reçue");
+                } else {
+                    System.err.println("❌ Course non trouvée pour l'ID : " + rideId);
+                    return ResponseEntity.badRequest().body("Course inexistante");
+                }
             }
             
+            System.err.println("⚠️ Aucun orderId valide trouvé dans le payload. Clés reçues : " + payload.keySet());
             return ResponseEntity.badRequest().body("Format orderId invalide");
             
         } catch (Exception e) {
             System.err.println("❌ Erreur lors du Webhook : " + e.getMessage());
+            e.printStackTrace();
             return ResponseEntity.badRequest().build();
         }
     }
